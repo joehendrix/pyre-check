@@ -10,6 +10,7 @@ open Core
 type section =
   [ `Check
   | `Debug
+  | `Definitions
   | `Dependencies
   | `DependencyGraph
   | `Dotty
@@ -33,6 +34,7 @@ type section =
 let section_to_string = function
   | `Check -> "Check"
   | `Debug -> "Debug"
+  | `Definitions -> "Definitions"
   | `Dependencies -> "Dependencies"
   | `DependencyGraph -> "DependencyGraph"
   | `Dotty -> "Dotty"

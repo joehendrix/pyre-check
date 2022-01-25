@@ -21,6 +21,7 @@ end
 type section =
   [ `Check
   | `Debug
+  | `Definitions
   | `Dependencies
   | `DependencyGraph
   | `Dotty
