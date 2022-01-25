@@ -27,8 +27,8 @@ echo "Build info: ${BUILD_INFO}"
 
 # Gather version information.
 VERSION=""
-if HG_VERSION="$(hg log -r . -T '{node}')"; then
-  VERSION="${HG_VERSION}"
+if [[ -d ".hg" ]]; then
+  VERSION="$(hg log -r . -T '{node}')";
   echo "HG revision: ${VERSION}"
 elif GIT_VERSION="$(git rev-parse HEAD)"; then
   VERSION="${GIT_VERSION}"
