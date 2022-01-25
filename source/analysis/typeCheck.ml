@@ -7007,36 +7007,71 @@ let run_on_defines ~scheduler ~configuration ~environment ?call_graph_builder de
 
   Statistics.performance ~name:"check_TypeCheck" ~phase_name:"Type check" ~timer ()
 
+let printrun_on_defines ~configuration ~environment ~path defines =
+  let number_of_defines = List.length defines in
+  let buffer = Buffer.create (number_of_defines * 128) in
+  let pp_define name =
+    let dependency =
+      match configuration with
+      | { Configuration.Analysis.incremental_style = FineGrained; _ } ->
+        Some (SharedMemoryKeys.DependencyKey.Registry.register
+                    (SharedMemoryKeys.TypeCheckDefine name))
+      | _ ->
+        None in
+    let def =
+      UnannotatedGlobalEnvironment.ReadOnly.get_define
+        environment
+        ?dependency
+        name in
+    match def with
+    | None -> ()
+    | Some definition ->
+      let body = match definition.body with
+                  | None -> `Null
+                  | Some b -> Node.to_yojson StatementDefine.to_yojson b in
+      Buffer.add_string buffer (Yojson.Safe.to_string body);
+      Buffer.add_char buffer '\n' in
+  List.iter defines ~f:pp_define;
+  File.create ~content:(Buffer.contents buffer) path |> File.write
+
+
+let get_all_defines ~scheduler ~unannotated_global_environment qualifiers =
+  let map _ qualifiers =
+    List.concat_map qualifiers ~f:(fun qualifier ->
+        UnannotatedGlobalEnvironment.ReadOnly.all_defines_in_module
+          unannotated_global_environment
+          qualifier)
+  in
+  Scheduler.map_reduce
+    scheduler
+    ~policy:
+      (Scheduler.Policy.fixed_chunk_count
+         ~minimum_chunks_per_worker:1
+         ~minimum_chunk_size:100
+         ~preferred_chunks_per_worker:5
+         ())
+    ~initial:[]
+    ~map
+    ~reduce:List.append
+    ~inputs:qualifiers
+    ()
 
 let legacy_run_on_modules ~scheduler ~configuration ~environment ?call_graph_builder qualifiers =
   Profiling.track_shared_memory_usage ~name:"Before legacy type check" ();
-
-  let all_defines =
-    let unannotated_global_environment =
-      TypeEnvironment.global_environment environment
-      |> AnnotatedGlobalEnvironment.read_only
-      |> AnnotatedGlobalEnvironment.ReadOnly.unannotated_global_environment
+  let unannotated_global_environment =
+    TypeEnvironment.global_environment environment
+    |> AnnotatedGlobalEnvironment.read_only
+    |> AnnotatedGlobalEnvironment.ReadOnly.unannotated_global_environment
+   in
+  let all_defines = get_all_defines ~scheduler ~unannotated_global_environment qualifiers in
+  if Log.is_enabled `Definitions then
+    let path =
+      PyrePath.create_relative
+        ~root:(Configuration.Analysis.log_directory configuration)
+        ~relative:"definitions.json"
     in
-    let map _ qualifiers =
-      List.concat_map qualifiers ~f:(fun qualifier ->
-          UnannotatedGlobalEnvironment.ReadOnly.all_defines_in_module
-            unannotated_global_environment
-            qualifier)
-    in
-    Scheduler.map_reduce
-      scheduler
-      ~policy:
-        (Scheduler.Policy.fixed_chunk_count
-           ~minimum_chunks_per_worker:1
-           ~minimum_chunk_size:100
-           ~preferred_chunks_per_worker:5
-           ())
-      ~initial:[]
-      ~map
-      ~reduce:List.append
-      ~inputs:qualifiers
-      ()
-  in
+    Log.info "Emitting definitions to %s" (PyrePath.absolute path);
+    printrun_on_defines ~configuration ~environment:unannotated_global_environment ~path  all_defines;
   let all_defines =
     match configuration with
     | { Configuration.Analysis.incremental_style = FineGrained; _ } ->
